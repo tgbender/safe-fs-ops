@@ -1,0 +1,64 @@
+[project]
+name = "safe-fs-ops"
+version = "0.1.0"
+description = "Safe filesystem operations with SQLite-backed journaling and recovery primitives."
+authors = [{ name = "Travis Bender" }]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+keywords = ["filesystem", "sqlite", "recovery", "transactions", "journaling"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: System :: Filesystems",
+]
+dependencies = ["sqlalchemy>=2.0.49"]
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["mypy>=1.0,<2.0", "pytest>=9.0.3,<10.0.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = [
+  "src",
+  "tests",
+  "tests/operation_journal",
+  "tests/sqlite_store",
+  "tests/filesystem_ops",
+]
+markers = [
+  "safe_fs_ops: focused tests for the safe-fs-ops package",
+  "safe_fs_ops_backend: focused tests for default backend capability reporting and smoke behavior",
+  "stress_lock: opt-in multi-process lock contention tests; run with --stress-locks",
+  "slow_recovery: slow recovery and automatic rollback integration tests; run with --slow-recovery",
+  "platform_windows: tests that require native Windows runtime support",
+  "platform_posix: tests that require POSIX runtime support",
+  "platform_macos: tests that require native macOS runtime support",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["SIM117"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["tests/"]

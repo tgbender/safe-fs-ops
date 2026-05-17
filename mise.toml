@@ -1,0 +1,120 @@
+[tools]
+trufflehog = "latest"
+uv = "latest"
+prek = "latest"
+ruff = "latest"
+bun = "latest"
+taplo = "latest"
+
+[env]
+MISE_NPM_PACKAGE_MANAGER = "bun"
+DO_NOT_TRACK = "1"
+PREK_QUIET = "1"
+
+[settings]
+npm.package_manager = "bun"
+windows_default_inline_shell_args = "powershell -NoProfile -Command"
+python.uv_venv_auto = true
+install_before = "3d"
+
+### SETUP TASKS
+[tasks.setup]
+description = "Sync deps and install editable package into venv"
+depends = ["uv-sync-all"]
+run = "uv pip install --editable ."
+
+[tasks.setup-hooks]
+description = "Install prek git hooks"
+run = "prek install"
+
+[tasks.hooks-run]
+description = "Run all prek hooks against all files"
+run = "prek run --all-files"
+
+[tasks.hooks-update]
+description = "Update prek hook repos"
+run = "prek autoupdate"
+
+[tasks.uv-sync-all]
+description = "Sync Python deps with uv"
+run = "uv sync --all-extras"
+
+[tasks.uv-lock-refresh]
+description = "Upgrade and refresh the uv lockfile"
+run = "uv lock --upgrade"
+
+### PRE-COMMIT
+[tasks.trufflehog-scan]
+description = "Scan git history for secrets (pre-commit)"
+run = "trufflehog git file://. --since-commit=HEAD~1 --no-verification --no-update --fail"
+
+### LINTERS AND FORMATTERS
+[tasks.check]
+description = "Run non-mutating checks"
+depends = ["lint", "test"]
+
+[tasks.format]
+description = "Run all auto-fixes and formatting"
+depends = ["ruff-fix", "ruff-format", "prettier-format", "taplo-format"]
+
+[tasks.lint]
+description = "Run all linters and type checks"
+depends = ["ruff-check", "mypy", "prettier-check", "taplo-check"]
+
+[tasks.ruff-check]
+description = "Check code with ruff"
+run = "ruff check ."
+
+[tasks.ruff-fix]
+description = "Auto-fix ruff lint violations"
+run = "ruff check --fix ."
+
+[tasks.ruff-format]
+description = "Format code with ruff"
+run = "ruff format ."
+
+[tasks.mypy]
+description = "Run mypy type checks"
+run = "uv run mypy ."
+
+[tasks.prettier-format]
+description = "Format non-Python files"
+run = "git ls-files '*.md' '*.json' '*.yaml' '*.yml' | bunx prettier --write '**/*.{md,json,yaml,yml}'"
+run_windows = "bunx prettier --write @(git ls-files '*.md' '*.json' '*.yaml' '*.yml')"
+
+[tasks.prettier-check]
+description = "Check non-Python file formatting"
+run = "git ls-files -z '*.md' '*.json' '*.yaml' '*.yml' | xargs -0 bunx prettier --check"
+run_windows = "bunx prettier --check @(git ls-files '*.md' '*.json' '*.yaml' '*.yml')"
+
+[tasks.taplo-format]
+description = "Format TOML files"
+run = "taplo fmt **/*.toml"
+
+[tasks.taplo-check]
+description = "Check TOML file formatting"
+run = "taplo fmt --check **/*.toml"
+
+### TESTS
+[tasks.test]
+description = "Run default tests, skipping slow recovery and stress tests"
+run = "uv run pytest -q"
+
+[tasks.test-slow]
+description = "Run slow recovery and automatic rollback tests"
+run = "uv run pytest -q --slow-recovery -m slow_recovery"
+
+[tasks.test-full]
+description = "Run default tests plus slow recovery tests, excluding stress tests"
+run = "uv run pytest -q --slow-recovery"
+
+[tasks.test-stress]
+description = "Run opt-in stress tests"
+run = "uv run pytest -q --stress-locks -m stress_lock"
+
+### OTHER
+[tasks.check-venv]
+description = "Verify python resolves inside the project virtualenv"
+dir = "{{ config_root }}"
+run = "case \"$(python -c 'import sys; print(sys.executable)')\" in \"{{ config_root }}\"*) ;; *) echo 'Python not in project venv'; exit 1 ;; esac"
+run_windows = "if (-not ((Get-Command python).Source -like \"*$PWD*\")) { Write-Error 'Python not in project venv'; exit 1 }"
