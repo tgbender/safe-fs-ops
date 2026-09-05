@@ -430,13 +430,14 @@ def test_transaction_heartbeats_lease_during_long_file_mutation(tmp_path: Path) 
         encoding: str = "utf-8",
         newline: str | None = None,
     ) -> None:
-        time.sleep(0.35)
+        # Outlast the lease while leaving heartbeat writes time for disk I/O.
+        time.sleep(6)
         portable_write_text(path, content, encoding=encoding, newline=newline)
 
     workspace = SafeWorkspace.open(
         tmp_path / "state.db",
         owner="owner-a",
-        lease_ttl=timedelta(milliseconds=180),
+        lease_ttl=timedelta(seconds=5),
         snapshot=portable_snapshot,
         write_text_operation=slow_write_text,
         delete_file_operation=portable_delete_file,
