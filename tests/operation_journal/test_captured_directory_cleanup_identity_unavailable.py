@@ -10,6 +10,7 @@ from safe_fs_ops.filesystem_ops import (
     IdentitySafeRemoveDirectoryUnavailableError,
     UnsupportedFilesystemMutationError,
 )
+from safe_fs_ops.filesystem_ops.directory_capture_token import directory_capture_token
 from safe_fs_ops.operation_journal.captured_directory_recovery_actions import (
     CapturedDirectoryCleanupCandidate,
     execute_captured_directory_cleanup_candidate,
@@ -72,5 +73,8 @@ def _empty_captured_directory_candidate(tmp_path: Path) -> CapturedDirectoryClea
             quarantine_path=quarantine,
             original_identity=identity,
             captured_identity=identity,
+            capture_token=directory_capture_token(
+                quarantine, device=identity.device, inode=identity.inode, create=True
+            ),
         ),
     )

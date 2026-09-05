@@ -16,6 +16,7 @@ from safe_fs_ops.filesystem_ops import (
     capture_directory_to_quarantine,
     rename_no_replace,
 )
+from safe_fs_ops.filesystem_ops.directory_capture_token import directory_capture_token
 from safe_fs_ops.operation_journal import (
     ArtifactCleanupTrigger,
     BatchPhase,
@@ -748,8 +749,10 @@ def test_capture_recovery_without_durable_restore_proof_requires_manual_interven
     assert actions[-1].payload["manual_intervention"]["reason_code"] == ("missing_captured_directory_restore_proof")
 
 
+@pytest.mark.parametrize("proof", ["present", "missing", "different"])
 def test_capture_recovery_derives_restore_proof_from_before_snapshot_and_quarantine(
     tmp_path: Path,
+    proof: str,
 ) -> None:
     state_path = tmp_path / "state.db"
     source = tmp_path / ".git"
@@ -787,6 +790,10 @@ def test_capture_recovery_derives_restore_proof_from_before_snapshot_and_quarant
         now=now,
     )[1]
     before_snapshot = _portable_snapshot(source)
+    capture_token = directory_capture_token(
+        source, device=before_snapshot.device, inode=before_snapshot.inode, create=True
+    )
+    assert capture_token is not None
     journal.record_checkpoint(
         batch.batch_id,
         lease=lease,
@@ -803,12 +810,26 @@ def test_capture_recovery_derives_restore_proof_from_before_snapshot_and_quarant
             "symlink_target": before_snapshot.symlink_target,
             "device": before_snapshot.device,
             "inode": before_snapshot.inode,
+            **({"capture_token": capture_token if proof == "present" else "0" * 32} if proof != "missing" else {}),
         },
         now=now,
     )
     source.rename(quarantine)
     journal.mark_failed(batch.batch_id, lease=lease, error="interrupted after move", now=now)
     journal.record_recovery_desired(batch.batch_id, lease=lease, reason="recover", now=now)
+
+    if proof != "present":
+        with pytest.raises(JournaledFilesystemRecoveryError):
+            coordinator.recover_batch(
+                batch.batch_id,
+                lease=lease,
+                recover=lambda context: coordinator.run_recovery_actions(context, lease=lease, now=now),
+                now=now,
+            )
+        assert not source.exists()
+        assert (quarantine / "HEAD").read_text() == "ref: refs/heads/main\n"
+        assert journal.list_recovery_actions(batch.batch_id)[-1].status == "manual_intervention_required"
+        return
 
     recovered = coordinator.recover_batch(
         batch.batch_id,

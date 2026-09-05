@@ -267,6 +267,7 @@ def _captured_directory_step_payload(
         "ownership_class": "captured_by_transaction",
         "captured_directory": {
             "original_path": str(record.original_path),
+            "capture_token": record.capture_token,
             "quarantine_path": str(record.quarantine_path),
             "original_identity": _directory_identity_payload(
                 record.original_path,

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from safe_fs_ops.filesystem_ops import DirectoryIdentity, inspect_path
+from safe_fs_ops.filesystem_ops.capture_directories import require_directory_capture_token
+from safe_fs_ops.filesystem_ops.paths import UnsafePathError
 from safe_fs_ops.operation_journal.captured_directory_recovery_actions import (
     RESTORE_CAPTURED_DIRECTORY_ACTION,
     planned_captured_directory_restore_payload,
@@ -130,12 +132,20 @@ def _observed_captured_directory_recovery_action_plan(
         return None
     if quarantine_identity != DirectoryIdentity(device=device, inode=inode):
         return None
+    capture_token = before_checkpoint.payload.get("capture_token")
+    if type(capture_token) is not str:
+        return None
+    try:
+        require_directory_capture_token(quarantine_path, identity=quarantine_identity, capture_token=capture_token)
+    except (OSError, UnsafePathError):
+        return None
     restore_payload = _captured_directory_restore_payload(
         source_path=source_path,
         quarantine_path=quarantine_path,
         resource_key=resource_key,
         device=device,
         inode=inode,
+        capture_token=capture_token,
     )
     return {
         "action_id": f"restore-captured-directory-from-before:{resource_key}:{source_path}",
@@ -176,6 +186,7 @@ def _captured_directory_restore_payload(
     resource_key: str,
     device: int,
     inode: int,
+    capture_token: str,
 ) -> dict[str, object]:
     original_identity = {
         "file_type": "directory",
@@ -200,6 +211,7 @@ def _captured_directory_restore_payload(
             "quarantine_path": str(quarantine_path),
             "original_identity": original_identity,
             "captured_identity": captured_identity,
+            "capture_token": capture_token,
             "ownership_class": "captured_by_transaction",
         },
     }

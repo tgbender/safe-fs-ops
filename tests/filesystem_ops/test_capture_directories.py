@@ -15,6 +15,7 @@ from safe_fs_ops.filesystem_ops import (
     cleanup_captured_directory,
     restore_captured_directory,
 )
+from safe_fs_ops.filesystem_ops.directory_capture_token import directory_capture_token
 
 pytestmark = pytest.mark.safe_fs_ops
 
@@ -28,13 +29,18 @@ def test_capture_moves_preexisting_directory_into_quarantine_and_records_identit
     (source / "data.txt").write_text("payload\n", encoding="utf-8")
     original_identity = DirectoryIdentity.from_stat(source.stat())
 
+    capture_token = directory_capture_token(
+        source, device=original_identity.device, inode=original_identity.inode, create=True
+    )
     captured = _capture_or_skip(source, quarantine)
 
+    assert captured.capture_token is not None
     assert captured == CapturedDirectoryRecord(
         original_path=source.resolve(strict=False),
         quarantine_path=quarantine.resolve(strict=False),
         original_identity=original_identity,
         captured_identity=original_identity,
+        capture_token=capture_token,
     )
     assert source.exists() is False
     assert quarantine.is_dir()

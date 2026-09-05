@@ -149,6 +149,36 @@ def test_restore_captured_directory_recovery_action_skips_when_directory_is_alre
         restore_captured_directory_recovery_action(_authorized_context(action), action)
 
 
+@pytest.mark.parametrize("already_restored", [False, True])
+@pytest.mark.parametrize("proof", [None, True, "123", "different"])
+def test_persisted_capture_requires_capture_token_even_when_already_restored(
+    tmp_path: Path,
+    already_restored: bool,
+    proof: object,
+) -> None:
+    source = tmp_path / "source"
+    quarantine = tmp_path / "quarantine"
+    source.mkdir()
+    (source / "data.txt").write_text("preserve me")
+    captured = capture_directory_to_quarantine(source, quarantine_path=quarantine)
+    if already_restored:
+        quarantine.rename(source)
+    payload = _captured_directory_action_payload(captured)
+    nested = cast(dict[str, object], payload["captured_directory"])
+    assert captured.capture_token is not None
+    if proof is None:
+        nested.pop("capture_token")
+    else:
+        nested["capture_token"] = "0" * 32 if proof == "different" else proof
+    action = _recovery_action(action_type=RESTORE_CAPTURED_DIRECTORY_ACTION, payload=payload)
+    with pytest.raises(RecoveryActionManualInterventionRequired):
+        restore_captured_directory_recovery_action(_authorized_context(action), action)
+    remaining = source if already_restored else quarantine
+    assert (remaining / "data.txt").read_text() == "preserve me"
+    assert source.exists() is already_restored
+    assert quarantine.exists() is not already_restored
+
+
 def test_journaled_filesystem_coordinator_registers_restore_captured_directory_action(
     tmp_path: Path,
 ) -> None:

@@ -14,6 +14,7 @@ from safe_fs_ops.filesystem_ops import (
     inspect_path,
     restore_captured_directory,
 )
+from safe_fs_ops.filesystem_ops.capture_directories import require_directory_capture_token
 from safe_fs_ops.filesystem_ops.remove_directories import IdentitySafeRemoveDirectoryUnavailableError
 from safe_fs_ops.operation_journal.models import (
     CheckpointRecord,
@@ -249,6 +250,7 @@ def planned_captured_directory_restore_payload(
             "quarantine_path": str(quarantine_path),
             "original_identity": jsonable_mapping(original_identity),
             "captured_identity": jsonable_mapping(captured_identity),
+            "capture_token": captured_directory.get("capture_token"),
             "ownership_class": ownership_class,
         },
         "recursive_mkdir_cleanup": {
@@ -297,11 +299,18 @@ def _captured_directory_record_from_payload(payload: Mapping[str, object]) -> Ca
         path=quarantine_path,
         resource_key=step_resource_key,
     )
+    capture_token = captured_directory.get("capture_token")
+    if type(capture_token) is not str:
+        raise RecoveryActionManualInterventionRequired(
+            f"captured-directory recovery requires capture-token evidence: {path}",
+            payload={"path": str(path), "reason_code": "missing_directory_capture_token"},
+        )
     return CapturedDirectoryRecord(
         original_path=original_path,
         quarantine_path=quarantine_path,
         original_identity=original_identity,
         captured_identity=captured_identity,
+        capture_token=capture_token,
         ownership_class="captured_by_transaction",
     )
 
@@ -410,6 +419,12 @@ def _skip_if_already_restored(
     except FileNotFoundError:
         return
     if original_identity != record.captured_identity:
+        return
+    try:
+        require_directory_capture_token(
+            record.original_path, identity=original_identity, capture_token=record.capture_token
+        )
+    except (OSError, UnsafePathError):
         return
     raise RecoveryActionSkipped(
         f"captured-directory restore skipped because directory is already restored: {record.original_path}",

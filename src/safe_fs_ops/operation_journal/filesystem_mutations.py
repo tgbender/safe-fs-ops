@@ -19,7 +19,8 @@ from safe_fs_ops.filesystem_ops import (
     SnapshotBundle,
 )
 from safe_fs_ops.filesystem_ops.backend import UnsupportedFilesystemBackendError
-from safe_fs_ops.filesystem_ops.paths import absolute_without_resolving
+from safe_fs_ops.filesystem_ops.directory_capture_token import directory_capture_token
+from safe_fs_ops.filesystem_ops.paths import UnsafePathError, absolute_without_resolving
 from safe_fs_ops.filesystem_ops.renames import RenamedFileType
 from safe_fs_ops.operation_journal.filesystem_failure_records import (
     JournaledFilesystemFailureRecordingMixin,
@@ -1220,13 +1221,14 @@ class JournaledFilesystemMutationMixin(JournaledFilesystemFailureRecordingMixin)
             ) from exc
         batch = started_batch
         before_snapshot = self._snapshot(source_path)
+        capture_token = _snapshot_directory_capture_token(source_path, before_snapshot, create=True)
         before_checkpoint = self._journal_store.record_checkpoint(
             batch.batch_id,
             lease=lease,
             operation_id=operation.operation_id,
             resource_key=resource_key,
             checkpoint_type="before",
-            payload=_snapshot_payload(before_snapshot),
+            payload={**_snapshot_payload(before_snapshot), "capture_token": capture_token},
             now=self._operation_time(now),
         )
         captured: CapturedDirectoryRecord | None = None
@@ -1245,6 +1247,7 @@ class JournaledFilesystemMutationMixin(JournaledFilesystemFailureRecordingMixin)
                 quarantine_path=quarantine_path,
                 resource_key=resource_key,
                 before_snapshot=before_snapshot,
+                capture_token=capture_token,
                 source_after=source_after,
                 quarantine_after=quarantine_after,
                 error=exc,
@@ -1719,6 +1722,7 @@ def _captured_directory_payload(
             "quarantine_path": str(record.quarantine_path),
             "original_identity": original_identity,
             "captured_identity": captured_identity,
+            "capture_token": record.capture_token,
             "ownership_class": record.ownership_class,
         },
     }
@@ -1884,6 +1888,7 @@ def _ambiguous_capture_recovery_payload(
     quarantine_path: Path,
     resource_key: str,
     before_snapshot: ResourceSnapshot,
+    capture_token: str | None,
     source_after: ResourceSnapshot | None,
     quarantine_after: ResourceSnapshot | None,
     error: Exception,
@@ -1895,6 +1900,7 @@ def _ambiguous_capture_recovery_payload(
         quarantine_path=quarantine_path,
         resource_key=resource_key,
         before_snapshot=before_snapshot,
+        capture_token=capture_token,
         quarantine_after=quarantine_after,
     )
     if capture_payload is not None:
@@ -1962,21 +1968,25 @@ def _captured_directory_payload_from_snapshots(
     quarantine_path: Path,
     resource_key: str,
     before_snapshot: ResourceSnapshot,
+    capture_token: str | None,
     quarantine_after: ResourceSnapshot | None,
 ) -> dict[str, object] | None:
     if quarantine_after is None:
         return None
     if before_snapshot.file_type != "directory" or quarantine_after.file_type != "directory":
         return None
-    if not _snapshot_identity_matches(quarantine_after, before_snapshot):
+    if (quarantine_after.device, quarantine_after.inode) != (before_snapshot.device, before_snapshot.inode):
         return None
     if before_snapshot.device is None or before_snapshot.inode is None:
+        return None
+    if capture_token is None or _snapshot_directory_capture_token(quarantine_path, quarantine_after) != capture_token:
         return None
     return {
         "path": str(source_path),
         "step_resource_key": resource_key,
         "ownership_class": "captured_by_transaction",
         "captured_directory": {
+            "capture_token": capture_token,
             "original_path": str(source_path),
             "quarantine_path": str(quarantine_path),
             "original_identity": {
@@ -2199,3 +2209,12 @@ def _manual_intervention_action_payload(
             "target_after": None if target_after is None else _snapshot_payload(target_after),
         },
     }
+
+
+def _snapshot_directory_capture_token(path: Path, snapshot: ResourceSnapshot, *, create: bool = False) -> str | None:
+    if snapshot.file_type != "directory" or snapshot.device is None or snapshot.inode is None:
+        return None
+    try:
+        return directory_capture_token(path, device=snapshot.device, inode=snapshot.inode, create=create)
+    except (OSError, UnsafePathError):
+        return None

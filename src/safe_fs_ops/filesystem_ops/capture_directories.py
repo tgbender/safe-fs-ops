@@ -8,6 +8,7 @@ from pathlib import Path
 from stat import S_ISDIR
 from typing import Literal
 
+from safe_fs_ops.filesystem_ops.directory_capture_token import directory_capture_token
 from safe_fs_ops.filesystem_ops.models import PathSafety
 from safe_fs_ops.filesystem_ops.mutations import DurabilityMode, UnsupportedFilesystemMutationError
 from safe_fs_ops.filesystem_ops.no_replace_rename import DirectoryNoReplaceRename, rename_directory_no_replace
@@ -32,6 +33,7 @@ class CapturedDirectoryRecord:
     original_identity: DirectoryIdentity
     captured_identity: DirectoryIdentity
     ownership_class: CapturedDirectoryOwnershipClass = "captured_by_transaction"
+    capture_token: str | None = None
 
     def __post_init__(self) -> None:
         if self.ownership_class != "captured_by_transaction":
@@ -43,6 +45,7 @@ def capture_directory_to_quarantine(
     *,
     quarantine_path: Path | str,
     _rename_no_replace: DirectoryNoReplaceRename = rename_directory_no_replace,
+    _capture_token: Callable[..., str | None] = directory_capture_token,
 ) -> CapturedDirectoryRecord:
     operation = "capture directory"
     source_path = absolute_without_resolving(source)
@@ -52,6 +55,11 @@ def capture_directory_to_quarantine(
 
     _require_safe_existing_directory(source_path, operation=operation)
     source_stat = source_path.stat()
+    capture_token = _capture_token(source_path, device=source_stat.st_dev, inode=source_stat.st_ino, create=True)
+    if capture_token is None:
+        raise UnsupportedFilesystemMutationError(
+            f"{operation} requires directory capture-token evidence: {source_path}"
+        )
     source_parent_stat = _require_existing_directory_stat(source_path.parent, operation=operation)
     quarantine_parent_stat = _require_existing_directory_stat(quarantine.parent, operation=operation)
     _require_same_device(
@@ -67,6 +75,7 @@ def capture_directory_to_quarantine(
     captured_stat = _require_post_rename_directory(quarantine, operation=operation)
     original_identity = DirectoryIdentity.from_stat(source_stat)
     captured_identity = DirectoryIdentity.from_stat(captured_stat)
+    require_directory_capture_token(quarantine, identity=captured_identity, capture_token=capture_token)
     if captured_identity != original_identity:
         raise UnsafePathError(
             f"{operation} refused to report success because captured identity changed unexpectedly: {quarantine}"
@@ -83,6 +92,7 @@ def capture_directory_to_quarantine(
         quarantine_path=quarantine,
         original_identity=original_identity,
         captured_identity=captured_identity,
+        capture_token=capture_token,
     )
 
 
@@ -104,6 +114,9 @@ def restore_captured_directory(
             f"{operation} refused because quarantine path no longer matches the captured directory identity: "
             f"{record.quarantine_path}"
         )
+    require_directory_capture_token(
+        record.quarantine_path, identity=record.captured_identity, capture_token=record.capture_token
+    )
     _require_same_device(
         quarantine_stat.st_dev,
         original_parent_stat.st_dev,
@@ -115,6 +128,9 @@ def restore_captured_directory(
 
     restored_stat = _require_post_rename_directory(record.original_path, operation=operation)
     restored_identity = DirectoryIdentity.from_stat(restored_stat)
+    require_directory_capture_token(
+        record.original_path, identity=record.captured_identity, capture_token=record.capture_token
+    )
     if restored_identity != record.captured_identity:
         raise UnsafePathError(
             f"{operation} refused to report success because restored identity changed unexpectedly: "
@@ -153,6 +169,9 @@ def cleanup_captured_directory(
             f"{operation} refused because quarantine path no longer matches the captured directory identity: "
             f"{record.quarantine_path}"
         )
+    require_directory_capture_token(
+        record.quarantine_path, identity=record.captured_identity, capture_token=record.capture_token
+    )
     _require_empty_captured_directory(record.quarantine_path, operation=operation)
     if _identity_remove_directory is None:
         remove_existing_empty_directory_by_identity(
@@ -163,6 +182,17 @@ def cleanup_captured_directory(
         )
         return
     _identity_remove_directory(record.quarantine_path, expected_identity=record.captured_identity)
+
+
+def require_directory_capture_token(path: Path, *, identity: DirectoryIdentity, capture_token: str | None) -> None:
+    """Reject recycled identities and legacy records without capture-token evidence."""
+    if (
+        capture_token is None
+        or directory_capture_token(path, device=identity.device, inode=identity.inode) != capture_token
+    ):
+        raise UnsafePathError(
+            f"captured directory no longer matches: capture-token evidence is missing or changed: {path}"
+        )
 
 
 def _require_empty_captured_directory(path: Path, *, operation: str) -> None:

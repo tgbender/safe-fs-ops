@@ -170,6 +170,29 @@ restore_captured_directory(record)
 Directory capture moves a directory to a caller-provided quarantine location and
 records ownership/identity information for recovery.
 
+Captured records persist a random `capture_token` together with device and
+inode. The token is stored on the directory as the POSIX extended attribute
+`user.safe_fs_ops.capture` or the Windows named data stream
+`:safe_fs_ops.capture`. It stays with the directory across renames, restoration,
+and edits to its contents, without adding a visible child. Inode and creation
+time can both be reused; a replacement directory does not inherit this tag.
+
+Capture requires writable, durable extended-attribute or named-stream support.
+If the filesystem cannot supply it, capture refuses before moving the directory.
+The current backends use Python's Linux `os.getxattr`/`os.setxattr` APIs and
+Windows named streams. Platforms without either backend, including macOS,
+currently refuse capture rather than use device and inode alone.
+The tag remains after restore and may be reused for later captures of that
+directory. These checks are not protection against an attacker who can copy or
+forge the tag or race filesystem mutations.
+
+Older records without `capture_token` require manual recovery or cleanup.
+Do not fill in an old record using metadata from the current path: that would
+trust the very replacement that recovery must detect. Journaled capture saves
+the token before moving, allowing recovery after a crash between the move and
+the captured-directory checkpoint. Recovery only reads the tag; it never creates
+one on a directory whose ownership is uncertain.
+
 Use this before high-risk directory teardown, especially when the directory may
 contain `.git` data.
 
