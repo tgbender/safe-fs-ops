@@ -71,7 +71,6 @@ def test_operation_serializes_phase_entry_across_threads(tmp_path: Path) -> None
         assert second_attempt_started.wait(timeout=5)
         time.sleep(0.1)
         blocking_store.release_first_create.set()
-        allow_first_phase_exit.set()
 
         for thread in threads:
             thread.join(timeout=5)
@@ -110,6 +109,8 @@ def _enter_phase_in_thread(
     except BaseException as exc:
         with result_lock:
             errors[name] = exc
+        # Keep the successful phase active until the competing entry is rejected.
+        allow_phase_exit.set()
 
 
 class _BlockingPhaseCreateJournalStore:
