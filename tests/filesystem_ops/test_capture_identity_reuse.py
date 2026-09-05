@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -107,6 +108,18 @@ def test_recovery_never_recreates_missing_or_malformed_directory_tag(tmp_path: P
             stream.unlink()
         else:
             stream.write_bytes(tag)
+    elif sys.platform == "darwin":
+        from safe_fs_ops.filesystem_ops.darwin_xattrs import DarwinXattrs
+
+        api = DarwinXattrs()
+        descriptor = os.open(quarantine, os.O_RDONLY)
+        try:
+            if tag is None:
+                api.remove(descriptor, "user.safe_fs_ops.capture")
+            else:
+                api.set(descriptor, "user.safe_fs_ops.capture", tag, 4)
+        finally:
+            os.close(descriptor)
     elif tag is None:
         os.removexattr(quarantine, "user.safe_fs_ops.capture")
     else:

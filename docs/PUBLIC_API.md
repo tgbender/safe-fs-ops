@@ -13,6 +13,7 @@ from safe_fs_ops import (
     DirectoryResource,
     DurabilityMode,
     FileResource,
+    LegacyCapture,
     ResourceHandle,
     ResourceNotClaimedError,
     ResourceSet,

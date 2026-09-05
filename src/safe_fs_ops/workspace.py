@@ -76,6 +76,7 @@ from safe_fs_ops.resources import (
 from safe_fs_ops.workspace_state import ClaimStore, LeaseStore
 
 if TYPE_CHECKING:
+    from safe_fs_ops.operation_journal.legacy_captures import LegacyCapture
     from safe_fs_ops.workspace_operation import SafeOperation
     from safe_fs_ops.workspace_transaction import SafeTransaction
 
@@ -268,6 +269,25 @@ class SafeWorkspace:
         from safe_fs_ops.workspace_rollback import recover_pending_workspace_batches
 
         return recover_pending_workspace_batches(self, run_id=run_id)
+
+    def list_legacy_captures(self, *, run_id: str | None = None) -> tuple[LegacyCapture, ...]:
+        from safe_fs_ops.workspace_legacy_captures import list_legacy_captures
+
+        return list_legacy_captures(self, run_id=run_id)
+
+    def recover_legacy_capture(
+        self,
+        candidate: LegacyCapture,
+        *,
+        confirm_ownership: bool,
+        reason: str,
+        _after_stage: Callable[[str], None] | None = None,
+    ) -> None:
+        from safe_fs_ops.workspace_legacy_captures import recover_legacy_capture
+
+        recover_legacy_capture(
+            self, candidate, confirm_ownership=confirm_ownership, reason=reason, after_stage=_after_stage
+        )
 
     def _require_filesystem_backend_operation(self, operation: str) -> None:
         self._filesystem_backend.require(operation)

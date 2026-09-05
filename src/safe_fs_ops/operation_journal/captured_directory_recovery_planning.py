@@ -10,6 +10,7 @@ from safe_fs_ops.operation_journal.captured_directory_recovery_actions import (
     RESTORE_CAPTURED_DIRECTORY_ACTION,
     planned_captured_directory_restore_payload,
 )
+from safe_fs_ops.operation_journal.legacy_captures import adopted_restore_plans
 from safe_fs_ops.operation_journal.models import CheckpointRecord, JournaledFilesystemRecoveryContext
 
 
@@ -21,6 +22,9 @@ def captured_directory_recovery_action_plans(
         return direct_plans
     payload = _latest_recursive_mkdir_failure_payload(context)
     if payload is None:
+        adopted = adopted_restore_plans(context)
+        if adopted:
+            return adopted
         manual_action = _latest_manual_intervention_action(context)
         if manual_action is not None:
             return (manual_action,)

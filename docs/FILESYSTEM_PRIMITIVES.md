@@ -179,19 +179,21 @@ time can both be reused; a replacement directory does not inherit this tag.
 
 Capture requires writable, durable extended-attribute or named-stream support.
 If the filesystem cannot supply it, capture refuses before moving the directory.
-The current backends use Python's Linux `os.getxattr`/`os.setxattr` APIs and
-Windows named streams. Platforms without either backend, including macOS,
-currently refuse capture rather than use device and inode alone.
+The backends use Python's Linux `os.getxattr`/`os.setxattr` APIs, native macOS
+`fgetxattr`/`fsetxattr` calls on an open directory descriptor, and Windows named
+streams. macOS uses its own syscall signatures and `XATTR_CREATE` flag value.
+Unsupported filesystems still refuse capture before moving the directory.
 The tag remains after restore and may be reused for later captures of that
 directory. These checks are not protection against an attacker who can copy or
 forge the tag or race filesystem mutations.
 
-Older records without `capture_token` require manual recovery or cleanup.
-Do not fill in an old record using metadata from the current path: that would
-trust the very replacement that recovery must detect. Journaled capture saves
+Older records without `capture_token` can be inspected and explicitly adopted
+through the [legacy capture recovery API](RECOVERY_MODEL.md#legacy-directory-captures).
+Normal recovery never invents ownership evidence from the current path.
+Journaled capture saves
 the token before moving, allowing recovery after a crash between the move and
 the captured-directory checkpoint. Recovery only reads the tag; it never creates
-one on a directory whose ownership is uncertain.
+one without an explicit legacy-ownership confirmation.
 
 Use this before high-risk directory teardown, especially when the directory may
 contain `.git` data.

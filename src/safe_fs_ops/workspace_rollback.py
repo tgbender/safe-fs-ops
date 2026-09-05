@@ -98,13 +98,14 @@ class _WorkspaceArtifactCleanupContext:
 def _workspace_batch_recovery_runner(
     workspace: SafeWorkspace,
     lease: LeaseRecord,
+    before_recovery: Callable[[JournaledFilesystemRecoveryContext, LeaseRecord], JournaledFilesystemRecoveryContext]
+    | None = None,
 ) -> Callable[[JournaledFilesystemRecoveryContext], object | None]:
     def recover(context: JournaledFilesystemRecoveryContext) -> object | None:
-        return workspace._coordinator.run_recovery_actions(
-            context,
-            lease=lease,
-            now=datetime.now(UTC),
-        )
+        with maintain_lease(workspace.lease_store, lease, enabled=before_recovery is not None):
+            if before_recovery is not None:
+                context = before_recovery(context, lease)
+            return workspace._coordinator.run_recovery_actions(context, lease=lease, now=datetime.now(UTC))
 
     return recover
 
@@ -297,6 +298,9 @@ def recover_pending_workspace_batches(
     workspace: SafeWorkspace,
     *,
     run_id: str | None = None,
+    _batch_id: str | None = None,
+    _before_recovery: Callable[[JournaledFilesystemRecoveryContext, LeaseRecord], JournaledFilesystemRecoveryContext]
+    | None = None,
 ) -> SafeWorkspaceError | None:
     cleanup_context = _WorkspaceArtifactCleanupContext(workspace=workspace)
     failures: list[tuple[OperationBatchRecord, BaseException]] = []
@@ -312,12 +316,23 @@ def recover_pending_workspace_batches(
     try:
         all_batches = workspace.journal_store.list_batches(run_id=run_id)
         all_batch_owner_scopes = _batch_owner_scopes(workspace.journal_store.list_batches())
-        batches = [batch for batch in all_batches if _is_pending_workspace_recovery_batch(workspace, batch)]
+        batches = [
+            batch
+            for batch in all_batches
+            if _is_pending_workspace_recovery_batch(workspace, batch)
+            or (batch.batch_id == _batch_id and batch.phase == BatchPhase.SUCCEEDED)
+        ]
         batches.sort(key=lambda batch: (batch.storage_order, batch.created_at, batch.batch_id), reverse=True)
         pending_batch_ids_by_owner_scope = _pending_recovery_batch_ids_by_owner_scope(batches)
         pending_batch_ids_by_claim = _pending_recovery_batch_ids_by_claim(batches)
-        recovered_batch_ids: set[str] = set()
+        recovered_batch_ids: set[str] = {
+            batch.batch_id
+            for batch in batches
+            if _batch_id is not None and batch.phase == BatchPhase.RECOVERY_SUCCEEDED
+        }
         for batch in batches:
+            if _batch_id is not None and batch.batch_id != _batch_id:
+                continue
             try:
                 batch_now = datetime.now(UTC)
                 refreshed_lease = workspace.lease_store.heartbeat(lease, ttl=workspace.lease_ttl, now=batch_now)
@@ -353,7 +368,7 @@ def recover_pending_workspace_batches(
                 recovery_result = workspace._coordinator.recover_batch(
                     batch.batch_id,
                     lease=lease,
-                    recover=_workspace_batch_recovery_runner(workspace, lease),
+                    recover=_workspace_batch_recovery_runner(workspace, lease, _before_recovery),
                     now=batch_now,
                 )
                 recovered_batch_ids.add(recovery_result.batch.batch_id)
@@ -1229,7 +1244,15 @@ def _cleanup_artifacts_for_batches(
                 debt = _artifact_cleanup_result_debt(backup_result)
                 if debt is not None:
                     debts.append(debt)
-            for captured_candidate in plan_captured_directory_cleanup_candidates(checkpoints):
+            legacy_context = None
+            if any(
+                checkpoint.checkpoint_type == "captured_directory"
+                and isinstance(checkpoint.payload.get("captured_directory"), Mapping)
+                and checkpoint.payload["captured_directory"].get("capture_token") is None
+                for checkpoint in checkpoints
+            ):
+                legacy_context = transaction.workspace.journal_store.read_recovery_context(batch.batch_id)
+            for captured_candidate in plan_captured_directory_cleanup_candidates(checkpoints, context=legacy_context):
                 prepared = _prepare_artifact_cleanup_attempt(
                     transaction,
                     batch=batch,

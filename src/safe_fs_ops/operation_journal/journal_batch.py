@@ -11,7 +11,9 @@ from safe_fs_ops.operation_journal.journal_errors import (
 )
 from safe_fs_ops.operation_journal.journal_guards import (
     _lease_token_digest,
+    _require_active_recovery_attempt,
     _require_appendable_phase,
+    _require_batch_for_recovery_action_write,
     _require_batch_for_write,
     _require_batch_resource_key,
     _require_matching_idempotent_batch,
@@ -335,6 +337,7 @@ class JournalBatchMixin:
         payload: Mapping[str, Any] | None = None,
         operation_id: str | None = None,
         checkpoint_id: str | None = None,
+        recovery_attempt_id: str | None = None,
         now: datetime | None = None,
     ) -> CheckpointRecord:
         _validate_required("batch_id", batch_id)
@@ -344,9 +347,13 @@ class JournalBatchMixin:
         payload_text = _payload_to_json(payload)
         self.initialize()
         with self.sqlite_store.transaction() as connection:
-            row = _require_batch_for_write(connection, batch_id, lease=lease, now=current_time)
+            if recovery_attempt_id is None:
+                row = _require_batch_for_write(connection, batch_id, lease=lease, now=current_time)
+                _require_appendable_phase(str(row[_BatchColumn.PHASE]))
+            else:
+                row = _require_batch_for_recovery_action_write(connection, batch_id, lease=lease, now=current_time)
+                _require_active_recovery_attempt(connection, batch_id, recovery_attempt_id=recovery_attempt_id)
             _require_batch_resource_key(row, resource_key, action="checkpoint record")
-            _require_appendable_phase(str(row[_BatchColumn.PHASE]))
             if operation_id is not None:
                 operation_row = _operation_row(connection, operation_id)
                 if operation_row is None:

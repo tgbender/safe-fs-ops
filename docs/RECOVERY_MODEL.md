@@ -83,6 +83,59 @@ allows the workspace to consider all eligible pending batches.
 Recovery uses lease and recovery-action authority checks. Stale workers cannot
 continue appending recovery actions after takeover.
 
+## Legacy Directory Captures
+
+Journals from older versions contain directory device/inode values but no
+`capture_token`. Those values alone cannot prove that a quarantined directory
+is still the original one. The workspace provides a supported recovery path:
+
+```python
+candidates = workspace.list_legacy_captures(run_id="run-123")
+for candidate in candidates:
+    print(candidate.capture_id, candidate.original_path,
+          candidate.quarantine_path, candidate.status)
+```
+
+Inventory does not tag or move directories. After inspecting the contents and
+confirming which particular directory belongs to the operation, select its
+`LegacyCapture` object and call:
+
+```python
+workspace.recover_legacy_capture(
+    selected_capture,
+    confirm_ownership=True,
+    reason="Operator inspected the quarantine and confirmed this capture",
+)
+```
+
+This is an explicit ownership decision by the caller. It is not an automatic
+upgrade based on a matching inode. The call checks the inspected directory's
+identity and metadata again, holds an OS handle while adopting it, and records
+the approver, reason, and intended token before writing the tag. A separate
+recovery checkpoint records the installed proof. Old journal records remain
+unchanged. Both checkpoints require the current lease and recovery attempt.
+
+The operation resumes the selected capture's batch through the normal recovery
+runner, including any other rollback actions already planned for that batch.
+Other batches are not restored by this call. Multiple unconfirmed captures in
+a batch require individual confirmations; previously completed adoptions remain
+available if another capture still needs attention.
+
+An existing destination, redirected path, changed identity, conflicting claim,
+or missing confirmation is refused. If the directory changed since inspection,
+inspect it again before confirming. The checks do not compare every file's
+contents and cannot supply the caller's ownership decision. Inventory statuses
+include `needs_confirmation`, `adopted`, `restored`, `identity_changed`, and
+`unavailable`; the last two need investigation rather than automatic adoption.
+
+After interruption before the proof checkpoint, repeat the explicit recovery
+call. A persisted matching tag allows safe retry without treating its own
+metadata update as tampering. Once proof is recorded, ordinary
+`recover_pending_batches()` can resume, including after the directory was
+restored but completion was not recorded. Adoption authorizes restoration and
+sets the adopted artifact's cleanup policy to `retain`; it does not authorize
+automatic deletion. No manual SQLite edits are needed.
+
 ## Artifact Cleanup
 
 Some operations create durable artifacts:

@@ -16,6 +16,7 @@ from safe_fs_ops.filesystem_ops import (
 )
 from safe_fs_ops.filesystem_ops.capture_directories import require_directory_capture_token
 from safe_fs_ops.filesystem_ops.remove_directories import IdentitySafeRemoveDirectoryUnavailableError
+from safe_fs_ops.operation_journal.legacy_captures import resolve_legacy_payload
 from safe_fs_ops.operation_journal.models import (
     CheckpointRecord,
     JournaledFilesystemRecoveryContext,
@@ -76,7 +77,7 @@ def restore_captured_directory_recovery_action(
     context: JournaledFilesystemRecoveryContext,
     action: RecoveryActionRecord,
 ) -> dict[str, object]:
-    payload = mapping_payload(action.payload)
+    payload = resolve_legacy_payload(context, mapping_payload(action.payload))
     record = _captured_directory_record_from_payload(payload)
     try:
         require_recovery_action_authority(context, action)
@@ -113,12 +114,18 @@ def restore_captured_directory_recovery_action(
 
 def plan_captured_directory_cleanup_candidates(
     checkpoints: Iterable[CheckpointRecord],
+    *,
+    context: JournaledFilesystemRecoveryContext | None = None,
 ) -> tuple[CapturedDirectoryCleanupCandidate, ...]:
     seen_artifact_ids: set[str] = set()
     candidates: list[CapturedDirectoryCleanupCandidate] = []
     for checkpoint in checkpoints:
         if checkpoint.checkpoint_type != "captured_directory":
             continue
+        if context is not None:
+            from dataclasses import replace
+
+            checkpoint = replace(checkpoint, payload=resolve_legacy_payload(context, checkpoint.payload))
         candidate = _captured_directory_cleanup_candidate(checkpoint)
         if candidate.artifact_id in seen_artifact_ids:
             continue

@@ -96,6 +96,11 @@ mise run test-stress
 
 ## Release Notes
 
+The test workflow runs Python 3.12 and 3.14 on Linux, Windows, and macOS. Native
+macOS tests exercise the Darwin xattr ABI; tests on another OS cannot substitute
+for that check. Legacy-capture process-exit tests are included in
+`--slow-recovery` and cover the approval, tag, and proof boundaries.
+
 The project metadata declares MIT licensing and uses `uv_build`.
 
 The release workflow is expected to build artifacts in CI and publish through
