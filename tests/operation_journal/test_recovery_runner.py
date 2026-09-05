@@ -409,7 +409,7 @@ def test_recovery_runner_heartbeats_lease_during_long_handler(tmp_path: Path) ->
     lease = lease_store.acquire(
         "workspace",
         owner="runner-a",
-        ttl=timedelta(milliseconds=900),
+        ttl=timedelta(seconds=30),
         now=now,
     )
     assert lease.acquired
@@ -417,7 +417,7 @@ def test_recovery_runner_heartbeats_lease_during_long_handler(tmp_path: Path) ->
     journal = OperationJournalStore(state_path)
 
     def slow_handler(_context, _action) -> None:
-        time.sleep(1.2)
+        time.sleep(6)
         target.write_text("restored\n", encoding="utf-8")
 
     batch = _start_recovering_batch(journal, lease=lease, resource_key=resource_key, now=now)
@@ -438,8 +438,13 @@ def test_recovery_runner_heartbeats_lease_during_long_handler(tmp_path: Path) ->
         journal=journal,
         recovery_action_handlers={"slow_handler": slow_handler},
     )
+    context = journal.read_recovery_context(batch.batch_id)
+    # Setup does not exercise the heartbeat and can be slow on native Windows.
+    # Start the short deadline only now; the handler still outlasts its TTL.
+    lease = lease_store.heartbeat(lease, ttl=timedelta(seconds=5))
+    assert lease is not None
     results = coordinator.run_recovery_actions(
-        journal.read_recovery_context(batch.batch_id),
+        context,
         lease=lease,
     )
 
