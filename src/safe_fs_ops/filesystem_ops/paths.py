@@ -12,6 +12,12 @@ class UnsafePathError(ValueError):
     """Raised when a primitive refuses to operate on an unsafe path."""
 
 
+def require_no_nul(path: Path | str) -> None:
+    """Reject paths that a NUL-terminated native API would silently shorten."""
+    if "\0" in str(path):
+        raise ValueError("filesystem path must not contain NUL characters")
+
+
 def absolute_without_resolving(path: Path | str) -> Path:
     """Return a stable absolute path without following symlinks."""
     return Path(os.path.abspath(Path(path).expanduser()))

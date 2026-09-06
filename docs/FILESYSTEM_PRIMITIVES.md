@@ -30,6 +30,11 @@ Safety helpers such as `ensure_safe_write_path`, `ensure_safe_delete_path`,
 redirect through symlinks, Windows reparse points, unsafe parents, mount points,
 or unsupported file types for the requested operation.
 
+Native rename helpers and Windows file primitives reject embedded NUL characters
+with `ValueError` before accessing the filesystem through a native API. Windows
+no-replace renames encode names as UTF-16, preserving supplementary characters
+such as emoji and lone surrogate code units accepted by Windows.
+
 ## Snapshots
 
 ```python

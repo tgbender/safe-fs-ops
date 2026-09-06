@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 
 from safe_fs_ops.filesystem_ops import (
+    DurabilityMode,
     capture_directory_to_quarantine,
     rename_no_replace,
     restore_captured_directory,
     restore_inverse_rename,
 )
+from safe_fs_ops.filesystem_ops._windows_identity_rmdir import remove_empty_directory_by_identity_windows
 from safe_fs_ops.filesystem_ops._windows_primitives import WindowsFilePrimitiveApi, replace_file_windows
 from safe_fs_ops.filesystem_ops.no_replace_rename import rename_path_no_replace
 
@@ -128,3 +130,19 @@ def test_windows_attributes_reject_nul_path(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="NUL"):
         api.get_file_attributes(Path(str(source) + "\0suffix"))
     assert source.read_text(encoding="utf-8") == "original"
+
+
+@pytest.mark.platform_windows
+@pytest.mark.skipif(os.name != "nt", reason="native Windows primitives")
+def test_windows_identity_remove_rejects_nul_without_deleting_directory(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    before = source.stat()
+    with pytest.raises(ValueError, match="NUL"):
+        remove_empty_directory_by_identity_windows(
+            Path(str(source) + "\0suffix"),
+            expected_identity=(before.st_dev, before.st_ino),
+            durability=DurabilityMode.NONE,
+        )
+    assert source.is_dir()
+    assert (source.stat().st_dev, source.stat().st_ino) == (before.st_dev, before.st_ino)

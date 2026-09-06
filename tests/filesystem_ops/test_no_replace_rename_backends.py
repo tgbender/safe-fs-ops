@@ -4,7 +4,6 @@ import ctypes
 import errno
 import os
 import sys
-from ctypes import wintypes
 from pathlib import Path
 
 import pytest
@@ -22,6 +21,22 @@ from safe_fs_ops.filesystem_ops.no_replace_rename import (
 )
 
 pytestmark = pytest.mark.safe_fs_ops
+
+
+@pytest.mark.parametrize("name", ["ascii", "a\U0001f600b", "\U0001f600\U0001f600", "name\ud800end"])
+def test_windows_backend_passes_complete_utf16_name(name: str) -> None:
+    kernel32, ntdll = _Kernel32Fake(), _NtdllFake()
+    _windows_no_replace_rename(
+        Path("workspace/source"),
+        Path("workspace") / name,
+        "rename",
+        kernel32=kernel32,
+        ntdll=ntdll,
+        availability_check=lambda: True,
+    )
+    assert len(ntdll.rename_calls) == 1
+    assert ntdll.rename_calls[0].file_name == name
+    assert kernel32.closed_handles == [101, 100]
 
 
 def test_linux_backend_uses_descriptor_relative_parent_fds() -> None:
@@ -366,8 +381,9 @@ class _NtdllFake:
         header = ctypes.cast(file_information, ctypes.POINTER(_FileRenameInfoHeader)).contents
         address = ctypes.cast(file_information, ctypes.c_void_p).value
         assert address is not None
-        file_name_length = int(header.FileNameLength // ctypes.sizeof(wintypes.WCHAR))
-        file_name = ctypes.wstring_at(address + _FILE_RENAME_INFO_FILENAME_OFFSET, file_name_length)
+        file_name = ctypes.string_at(address + _FILE_RENAME_INFO_FILENAME_OFFSET, header.FileNameLength).decode(
+            "utf-16-le", errors="surrogatepass"
+        )
         self.rename_calls.append(
             _RenameCall(
                 source_handle=source_handle,

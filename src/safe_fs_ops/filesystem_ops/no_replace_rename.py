@@ -17,6 +17,7 @@ from safe_fs_ops.filesystem_ops.mutation_support import (
     _ensure_directory_descriptor_matches_path_after_mutation,
     _open_directory_for_mutation,
 )
+from safe_fs_ops.filesystem_ops.paths import require_no_nul
 
 
 class DirectoryNoReplaceRename(Protocol):
@@ -91,7 +92,7 @@ class _FileRenameInfoTemplate(ctypes.Structure):
         ("ReplaceIfExists", wintypes.BOOLEAN),
         ("RootDirectory", wintypes.HANDLE),
         ("FileNameLength", wintypes.ULONG),
-        ("FileName", wintypes.WCHAR * 1),
+        ("FileName", ctypes.c_uint16 * 1),
     ]
 
 
@@ -289,6 +290,8 @@ def _windows_no_replace_rename(
     last_error_reader: WindowsLastErrorReader | None = None,
     availability_check: Callable[[], bool] | None = None,
 ) -> None:
+    _require_leaf_name(source)
+    _require_leaf_name(destination)
     check_available = windows_no_replace_rename_available if availability_check is None else availability_check
     if not check_available():
         raise _unsupported_no_replace_rename(operation, "Windows handle rename API is unavailable")
@@ -336,7 +339,10 @@ def windows_no_replace_rename_available() -> bool:
 
 def _linux_renameat2_syscall() -> LinuxRenameAt2Syscall:
     libc = ctypes.CDLL(None, use_errno=True)
-    return libc.syscall
+    syscall = libc.syscall
+    syscall.argtypes = [ctypes.c_long]  # Fixed argument; the remaining syscall arguments are variadic.
+    syscall.restype = ctypes.c_long
+    return cast(LinuxRenameAt2Syscall, syscall)
 
 
 def _macos_renameatx_np(operation: str) -> MacOSRenameAtxNp:
@@ -476,6 +482,7 @@ def _open_windows_handle(
     operation: str,
     read_last_error: WindowsLastErrorReader,
 ) -> int:
+    require_no_nul(path)
     handle = kernel32.CreateFileW(
         str(path),
         desired_access,
@@ -491,21 +498,26 @@ def _open_windows_handle(
 
 
 def _file_rename_info(file_name: str, root_directory_handle: int) -> tuple[Any, int]:
-    wchar_count = len(file_name) + 1
+    require_no_nul(file_name)
+    # WCHAR counts UTF-16 code units, not Python characters. Preserve lone
+    # surrogates too: Windows filenames can contain them.
+    encoded_name = file_name.encode("utf-16-le", errors="surrogatepass")
+    wchar_count = len(encoded_name) // 2 + 1
+    name_type = ctypes.c_uint16 * wchar_count
 
     class _FileRenameInfo(ctypes.Structure):
         _fields_: ClassVar[list[tuple[str, Any]]] = [
             ("ReplaceIfExists", wintypes.BOOLEAN),
             ("RootDirectory", wintypes.HANDLE),
             ("FileNameLength", wintypes.DWORD),
-            ("FileName", wintypes.WCHAR * wchar_count),
+            ("FileName", name_type),
         ]
 
     rename_info = _FileRenameInfo()
     rename_info.ReplaceIfExists = False
     rename_info.RootDirectory = root_directory_handle
-    rename_info.FileNameLength = len(file_name) * ctypes.sizeof(wintypes.WCHAR)
-    rename_info.FileName = file_name
+    rename_info.FileNameLength = len(encoded_name)
+    rename_info.FileName = name_type.from_buffer_copy(encoded_name + b"\0\0")
     return rename_info, ctypes.sizeof(rename_info)
 
 
@@ -577,6 +589,7 @@ def _renameat2_syscall_number() -> int | None:
 
 
 def _require_leaf_name(path: Path) -> None:
+    require_no_nul(path)
     if path.name in {"", os.curdir, os.pardir}:
         raise ValueError(f"rename path must have a leaf name: {path}")
 

@@ -13,7 +13,7 @@ from safe_fs_ops.filesystem_ops.mutation_support import (
     ParentChangedAfterMutationError,
     UnsupportedFilesystemMutationError,
 )
-from safe_fs_ops.filesystem_ops.paths import UnsafePathError
+from safe_fs_ops.filesystem_ops.paths import UnsafePathError, require_no_nul
 
 _ERROR_FILE_NOT_FOUND = 2
 _ERROR_PATH_NOT_FOUND = 3
@@ -91,6 +91,7 @@ def remove_empty_directory_by_identity_windows(
     _file_information_reader: FileInformationReader | None = None,
     _removed_checker: RemovedChecker | None = None,
 ) -> None:
+    require_no_nul(path)
     if not _availability_check():
         raise UnsupportedFilesystemMutationError(
             "identity-safe rmdir refused because native Windows handle delete disposition API is unavailable"
@@ -203,6 +204,7 @@ def _kernel32() -> Any:
 
 
 def _open_directory_handle(kernel32: Any, path: Path) -> int:
+    require_no_nul(path)
     handle = kernel32.CreateFileW(
         str(path),
         _DELETE | _FILE_READ_ATTRIBUTES,
@@ -343,6 +345,7 @@ def _flush_parent_handle_for_durability(
 
 
 def _open_parent_handle(kernel32: Any, path: Path, *, for_flush: bool) -> int:
+    require_no_nul(path)
     desired_access = _FILE_READ_ATTRIBUTES
     if for_flush:
         desired_access |= _GENERIC_WRITE

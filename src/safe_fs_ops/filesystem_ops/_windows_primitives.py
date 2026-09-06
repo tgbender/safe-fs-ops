@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from safe_fs_ops.filesystem_ops.mutation_support import UnsupportedFilesystemMutationError
-from safe_fs_ops.filesystem_ops.paths import UnsafePathError
+from safe_fs_ops.filesystem_ops.paths import UnsafePathError, require_no_nul
 
 _ERROR_FILE_NOT_FOUND = 2
 _ERROR_PATH_NOT_FOUND = 3
@@ -78,6 +78,7 @@ class WindowsFilePrimitiveApi:
         return cls(kernel32=kernel32)
 
     def get_file_attributes(self, path: Path) -> int:
+        require_no_nul(path)
         attributes = int(self.kernel32.GetFileAttributesW(str(path)))
         if attributes == _INVALID_FILE_ATTRIBUTES:
             _raise_windows_error(self, path=path, operation="read file attributes")
@@ -91,6 +92,8 @@ class WindowsFilePrimitiveApi:
         return bool(attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
 
     def replace_existing_file(self, source: Path, destination: Path) -> None:
+        require_no_nul(source)
+        require_no_nul(destination)
         ok = self.kernel32.ReplaceFileW(
             str(destination),
             str(source),
@@ -108,6 +111,8 @@ class WindowsFilePrimitiveApi:
             _raise_windows_error(self, path=destination, operation="replace existing file", error=error)
 
     def move_file_replace(self, source: Path, destination: Path, *, write_through: bool) -> None:
+        require_no_nul(source)
+        require_no_nul(destination)
         move_file_ex = getattr(self.kernel32, "MoveFileExW", None)
         if move_file_ex is None:
             raise UnsupportedFilesystemMutationError("MoveFileExW is unavailable")
@@ -169,6 +174,8 @@ def replace_file_windows(
     """
     source_path = Path(source)
     destination_path = Path(destination)
+    require_no_nul(source_path)
+    require_no_nul(destination_path)
     primitive_api = api or default_windows_file_api()
     try:
         destination_attributes = primitive_api.get_file_attributes(destination_path)
