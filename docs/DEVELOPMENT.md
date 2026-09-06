@@ -36,6 +36,14 @@ Stress tests:
 uv run pytest -q --stress-locks -m stress_lock
 ```
 
+The test workflow also offers a `stress` checkbox for manual runs across the OS
+and Python matrix. Push and pull-request runs keep stress tests disabled.
+
+On Windows, the native ABI test compiles a small probe against the installed
+Windows SDK and compares its structure sizes and offsets with ctypes. It uses
+`cl` on PATH or locates Visual Studio's C++ tools through `vswhere`. Local runs
+skip this test if no compiler is installed; Windows CI requires it.
+
 Type check:
 
 ```bash

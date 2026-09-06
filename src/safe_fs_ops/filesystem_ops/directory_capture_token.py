@@ -6,6 +6,7 @@ import errno
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from stat import S_ISDIR
 from uuid import uuid4
@@ -23,6 +24,7 @@ def directory_capture_token(
     inode: int,
     create: bool = False,
     _token: str | None = None,
+    _metadata_reader: Callable[..., bytes | None] | None = None,
 ) -> str | None:
     """Read a tag; initialize before capture or during explicit legacy adoption.
 
@@ -33,11 +35,9 @@ def directory_capture_token(
     if _token is not None and (not create or re.fullmatch(r"[0-9a-f]{32}", _token) is None):
         raise ValueError("an explicit token must be 32 lowercase hex characters and requires create=True")
     _require_identity(path, path.lstat(), device=device, inode=inode)
+    reader = _read_metadata if _metadata_reader is None else _metadata_reader
     try:
-        if os.name == "nt":
-            value = _windows_token(path, create=create, token=_token)
-        else:
-            value = _posix_token(path, device=device, inode=inode, create=create, token=_token)
+        value = reader(path, device=device, inode=inode, create=create, token=_token)
     except OSError:
         return None
     _require_identity(path, path.lstat(), device=device, inode=inode)
@@ -51,21 +51,52 @@ def _require_identity(path: Path, observed: os.stat_result, *, device: int, inod
         raise UnsafePathError(f"directory identity changed while reading capture token: {path}")
 
 
-def _windows_token(path: Path, *, create: bool, token: str | None) -> bytes | None:
+def _read_metadata(
+    path: Path,
+    *,
+    device: int,
+    inode: int,
+    create: bool,
+    token: str | None,
+    sync: Callable[[int], None] = os.fsync,
+) -> bytes | None:
+    if os.name == "nt":
+        return _windows_token(path, create=create, token=token, sync=sync)
+    return _posix_token(path, device=device, inode=inode, create=create, token=token, sync=sync)
+
+
+def _windows_token(
+    path: Path,
+    *,
+    create: bool,
+    token: str | None,
+    sync: Callable[[int], None] = os.fsync,
+) -> bytes | None:
     stream = Path(str(path) + _STREAM)
     if create:
         try:
             with stream.open("xb") as handle:
                 handle.write((token or uuid4().hex).encode("ascii"))
                 handle.flush()
-                os.fsync(handle.fileno())
+                sync(handle.fileno())
         except FileExistsError:
-            pass
+            # An earlier attempt may have written the tag but failed to flush
+            # it. Re-establish durability before treating it as capture proof.
+            with stream.open("r+b") as handle:
+                sync(handle.fileno())
     with stream.open("rb") as handle:
         return handle.read(33)
 
 
-def _posix_token(path: Path, *, device: int, inode: int, create: bool, token: str | None) -> bytes | None:
+def _posix_token(
+    path: Path,
+    *,
+    device: int,
+    inode: int,
+    create: bool,
+    token: str | None,
+    sync: Callable[[int], None] = os.fsync,
+) -> bytes | None:
     getxattr = getattr(os, "getxattr", None)
     setxattr = getattr(os, "setxattr", None)
     directory_flag = getattr(os, "O_DIRECTORY", None)
@@ -89,7 +120,7 @@ def _posix_token(path: Path, *, device: int, inode: int, create: bool, token: st
                 if exc.errno != errno.EEXIST:
                     raise
             # Persist the tag before its journal checkpoint can become durable.
-            os.fsync(descriptor)
+            sync(descriptor)
         value: bytes = getxattr(descriptor, _ATTRIBUTE)
         return value
     finally:

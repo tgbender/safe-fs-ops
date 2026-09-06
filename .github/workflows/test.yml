@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      stress:
+        description: Include multiprocess contention stress tests
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,6 +27,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked
-      - run: uv run pytest -q --slow-recovery
+      - run: uv run pytest -q --slow-recovery ${{ inputs.stress && '--stress-locks' || '' }}
       - run: uv run mypy src
       - run: uv build

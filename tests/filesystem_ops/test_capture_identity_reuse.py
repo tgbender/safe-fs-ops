@@ -96,7 +96,7 @@ def test_capture_refuses_unavailable_capture_token_before_moving(tmp_path: Path)
 
 
 @pytest.mark.parametrize("action", ["restore", "cleanup"])
-@pytest.mark.parametrize("tag", [None, b"invalid"])
+@pytest.mark.parametrize("tag", [None, b"invalid", b"", b"a" * 33, b"a" * 128])
 def test_recovery_never_recreates_missing_or_malformed_directory_tag(tmp_path: Path, action: str, tag: bytes | None):
     source = tmp_path / "source"
     quarantine = tmp_path / "quarantine"

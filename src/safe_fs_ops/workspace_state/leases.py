@@ -330,6 +330,9 @@ class LeaseStore:
                     .values(
                         heartbeat_at=current_time.isoformat(),
                         expires_at=current_time.isoformat(),
+                        # Expiry alone cannot revoke a heartbeat that sampled
+                        # its clock before release and reaches storage later.
+                        token=secrets.token_hex(16),
                     )
                 )
                 return int(cast(Any, released_result).rowcount) == 1
@@ -378,7 +381,8 @@ def _release_lease_in_connection(connection: sqlite3.Connection, lease: LeaseRec
         f"""
         UPDATE {_LEASE_TABLE}
         SET {_LeaseColumn.HEARTBEAT_AT} = ?,
-            {_LeaseColumn.EXPIRES_AT} = ?
+            {_LeaseColumn.EXPIRES_AT} = ?,
+            {_LeaseColumn.TOKEN} = ?
         WHERE {_LeaseColumn.NAME} = ?
           AND {_LeaseColumn.OWNER} = ?
           AND {_LeaseColumn.TOKEN} = ?
@@ -388,6 +392,7 @@ def _release_lease_in_connection(connection: sqlite3.Connection, lease: LeaseRec
         (
             now.isoformat(),
             now.isoformat(),
+            secrets.token_hex(16),
             lease.name,
             lease.owner,
             lease.token,

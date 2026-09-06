@@ -13,6 +13,11 @@ backup artifacts, failures, recovery plans, recovery attempts, and terminal
 outcomes. If the package cannot prove that a recovery action is safe, it records
 manual intervention required instead of guessing.
 
+Releasing a workspace lease atomically revokes its secret token as well as
+expiring it. A heartbeat delayed until after release cannot renew the old
+authority, even if it sampled its clock before release. The next acquisition
+continues to advance the fencing counter.
+
 ## What Gets Recorded
 
 For a journaled mutation, the coordinator can record:

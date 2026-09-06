@@ -184,6 +184,8 @@ time can both be reused; a replacement directory does not inherit this tag.
 
 Capture requires writable, durable extended-attribute or named-stream support.
 If the filesystem cannot supply it, capture refuses before moving the directory.
+Retries flush existing capture metadata too: a tag left behind by a failed flush
+does not establish durability by itself.
 The backends use Python's Linux `os.getxattr`/`os.setxattr` APIs, native macOS
 `fgetxattr`/`fsetxattr` calls on an open directory descriptor, and Windows named
 streams. macOS uses its own syscall signatures and `XATTR_CREATE` flag value.

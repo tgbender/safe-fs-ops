@@ -43,13 +43,21 @@ workspace.recover_legacy_capture(workspace.list_legacy_captures()[0], confirm_ow
     assert workspace.journal_store.list_checkpoints(batch_id)[-1].checkpoint_type == (
         ADOPTION if stage == "proof" else APPROVAL
     )
-    active = workspace.lease_store.active(workspace.lease_name)
-    if active is not None:
-        time.sleep(max(0, (active.expires_at - datetime.now(UTC)).total_seconds()) + 0.1)
+    # Leases use wall-clock time. One monotonic sleep does not prove expiry
+    # when the host adjusts that clock; wait for the authoritative store state.
+    deadline = time.monotonic() + 30
+    while (active := workspace.lease_store.active(workspace.lease_name)) is not None:
+        remaining_wait = deadline - time.monotonic()
+        assert remaining_wait > 0, ("crashed worker lease did not expire", datetime.now(UTC), active)
+        time.sleep(min(5, remaining_wait))
     if stage == "proof":
         assert workspace.recover_pending_batches() is None
     else:
-        assert workspace.recover_pending_batches() is not None
+        error = workspace.recover_pending_batches()
+        assert error is not None
+        assert "workspace lease" not in str(error), str(error)
+        remaining = workspace.lease_store.active(workspace.lease_name)
+        assert remaining is None, (datetime.now(UTC), remaining)
         workspace.recover_legacy_capture(candidate, confirm_ownership=True, reason="Reviewed after process exit")
     assert (source / "data.txt").read_text() == "original contents"
     assert not quarantine.exists()

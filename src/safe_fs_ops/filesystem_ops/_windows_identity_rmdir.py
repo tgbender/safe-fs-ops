@@ -277,7 +277,10 @@ def _python_stat_identity(
         os.close(file_descriptor)
 
 
-def _set_delete_disposition(kernel32: Any, handle: int, *, path: Path) -> None:
+def _set_delete_disposition(
+    kernel32: Any, handle: int, *, path: Path, last_error_reader: Callable[[], int] | None = None
+) -> None:
+    read_error = _get_last_error if last_error_reader is None else last_error_reader
     disposition_ex = _FileDispositionInfoEx(
         _FILE_DISPOSITION_DELETE | _FILE_DISPOSITION_POSIX_SEMANTICS | _FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE
     )
@@ -288,8 +291,9 @@ def _set_delete_disposition(kernel32: Any, handle: int, *, path: Path) -> None:
         ctypes.sizeof(disposition_ex),
     ):
         return
-    if _get_last_error() != _ERROR_INVALID_PARAMETER:
-        _raise_last_error(path=path, operation="mark directory for deletion")
+    error = read_error()
+    if error != _ERROR_INVALID_PARAMETER:
+        _raise_last_error(path=path, operation="mark directory for deletion", error=error)
 
     disposition = _FileDispositionInfo(True)
     if not kernel32.SetFileInformationByHandle(
@@ -298,7 +302,7 @@ def _set_delete_disposition(kernel32: Any, handle: int, *, path: Path) -> None:
         ctypes.byref(disposition),
         ctypes.sizeof(disposition),
     ):
-        _raise_last_error(path=path, operation="mark directory for deletion")
+        _raise_last_error(path=path, operation="mark directory for deletion", error=read_error())
 
 
 def _ensure_parent_path_still_matches_handle(
@@ -335,13 +339,15 @@ def _flush_parent_handle_for_durability(
     parent: Path,
     *,
     durability: DurabilityMode,
+    last_error_reader: Callable[[], int] | None = None,
 ) -> None:
     if durability is DurabilityMode.NONE:
         return
     if kernel32.FlushFileBuffers(handle):
         return
     if durability is DurabilityMode.FSYNC:
-        _raise_last_error(path=parent, operation="flush parent directory")
+        read_error = _get_last_error if last_error_reader is None else last_error_reader
+        _raise_last_error(path=parent, operation="flush parent directory", error=read_error())
 
 
 def _open_parent_handle(kernel32: Any, path: Path, *, for_flush: bool) -> int:
@@ -382,8 +388,8 @@ def _handle_value(handle: object) -> int:
     raise TypeError(f"expected Windows handle value, got {type(handle).__name__}")
 
 
-def _raise_last_error(*, path: Path, operation: str) -> None:
-    error = _get_last_error()
+def _raise_last_error(*, path: Path, operation: str, error: int | None = None) -> None:
+    error = _get_last_error() if error is None else error
     if error in {_ERROR_FILE_NOT_FOUND, _ERROR_PATH_NOT_FOUND}:
         raise FileNotFoundError(path)
     raise OSError(error, f"identity-safe rmdir failed to {operation}: {path}")
