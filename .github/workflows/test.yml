@@ -27,6 +27,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked
+      - name: Verify Windows SDK ABI
+        if: runner.os == 'Windows'
+        run: uv run pytest tests/filesystem_ops/test_windows_abi.py -q
       - run: uv run pytest -q --slow-recovery ${{ inputs.stress && '--stress-locks' || '' }}
       - run: uv run mypy src
       - run: uv build
