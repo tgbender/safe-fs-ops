@@ -1,6 +1,6 @@
 [project]
 name = "safe-fs-ops"
-version = "0.1.0"
+version = "0.1.1"
 description = "Safe filesystem operations with SQLite-backed journaling and recovery primitives."
 authors = [{ name = "Travis Bender" }]
 readme = "README.md"

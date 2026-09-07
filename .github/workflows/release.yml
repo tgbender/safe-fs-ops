@@ -68,4 +68,5 @@ jobs:
           gh release create "v${{ needs.build.outputs.version }}" dist/* \
             --repo "${{ github.repository }}" \
             --title "v${{ needs.build.outputs.version }}" \
+            --target "$GITHUB_SHA" \
             --generate-notes

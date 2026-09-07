@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-05-09T18:26:21.2931815Z"
+exclude-newer = "2026-09-04T05:33:49.4379303Z"
 exclude-newer-span = "P3D"
 
 [[package]]
@@ -229,7 +229,7 @@ wheels = [
 
 [[package]]
 name = "safe-fs-ops"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "sqlalchemy" },
