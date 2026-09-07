@@ -130,6 +130,7 @@ def _rename_path_no_replace(
     operation: str,
     os_name: str,
     platform_name: str,
+    linux_machine: str | None = None,
     linux_rename: LinuxRenameAt2Syscall | None = None,
     macos_rename: MacOSRenameAtxNp | None = None,
     windows_rename: WindowsNoReplaceRename | None = None,
@@ -151,6 +152,7 @@ def _rename_path_no_replace(
             source,
             destination,
             operation=operation,
+            machine=linux_machine,
             rename=linux_rename,
             open_parent_fd=parent_opener,
             validate_parent_fd=validate_parent_fd,
@@ -180,6 +182,7 @@ def _linux_renameat2_no_replace(
     destination: Path,
     *,
     operation: str,
+    machine: str | None = None,
     rename: LinuxRenameAt2Syscall | None = None,
     open_parent_fd: ParentDirectoryOpener | None = None,
     validate_parent_fd: ParentDirectoryValidator | None = None,
@@ -187,9 +190,10 @@ def _linux_renameat2_no_replace(
     close_fd: FileDescriptorCloser = os.close,
     errno_reader: ErrnoReader = ctypes.get_errno,
 ) -> None:
-    syscall_number = _renameat2_syscall_number()
+    machine = platform.machine() if machine is None else machine
+    syscall_number = _renameat2_syscall_number(machine)
     if syscall_number is None:
-        raise _unsupported_no_replace_rename(operation, f"Linux machine {platform.machine()!r} is not recognized")
+        raise _unsupported_no_replace_rename(operation, f"Linux machine {machine!r} is not recognized")
 
     syscall = _linux_renameat2_syscall() if rename is None else rename
     parent_opener = _open_parent_directory_fd if open_parent_fd is None else open_parent_fd
@@ -584,8 +588,8 @@ def _handle_value(handle: object) -> int:
     raise TypeError(f"expected Windows handle value, got {type(handle).__name__}")
 
 
-def _renameat2_syscall_number() -> int | None:
-    return _RENAMEAT2_SYSCALLS.get(platform.machine().lower())
+def _renameat2_syscall_number(machine: str) -> int | None:
+    return _RENAMEAT2_SYSCALLS.get(machine.lower())
 
 
 def _require_leaf_name(path: Path) -> None:

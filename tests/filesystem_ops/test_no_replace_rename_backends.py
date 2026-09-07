@@ -39,7 +39,11 @@ def test_windows_backend_passes_complete_utf16_name(name: str) -> None:
     assert kernel32.closed_handles == [101, 100]
 
 
-def test_linux_backend_uses_descriptor_relative_parent_fds() -> None:
+@pytest.mark.parametrize(
+    ("machine", "expected_number"),
+    [("x86_64", 316), ("AMD64", 316), ("aarch64", 276), ("armv7l", 382), ("i386", 353), ("i686", 353)],
+)
+def test_linux_backend_uses_descriptor_relative_parent_fds(machine: str, expected_number: int) -> None:
     opener = _ParentFdRecorder()
     calls: list[tuple[int, int, bytes, int, bytes, int]] = []
 
@@ -60,6 +64,7 @@ def test_linux_backend_uses_descriptor_relative_parent_fds() -> None:
         operation="rename",
         os_name="posix",
         platform_name="linux",
+        linux_machine=machine,
         linux_rename=syscall,
         open_parent_fd=opener.open,
         validate_parent_fd=_validate_parent_noop,
@@ -73,10 +78,29 @@ def test_linux_backend_uses_descriptor_relative_parent_fds() -> None:
     ]
     assert opener.closed == [101, 100]
     assert len(calls) == 1
-    _, source_fd, source_name, destination_fd, destination_name, flags = calls[0]
+    number, source_fd, source_name, destination_fd, destination_name, flags = calls[0]
+    assert number == expected_number
     assert (source_fd, source_name) == (100, b"state")
     assert (destination_fd, destination_name) == (101, b"state")
     assert flags == _RENAME_NOREPLACE
+
+
+def test_linux_backend_rejects_unknown_machine_before_opening_parents() -> None:
+    opener = _ParentFdRecorder()
+    with pytest.raises(UnsupportedFilesystemMutationError, match="Linux machine 'unknown' is not recognized"):
+        _rename_path_no_replace(
+            Path("/workspace/source/state"),
+            Path("/workspace/quarantine/state"),
+            operation="rename",
+            os_name="posix",
+            platform_name="linux",
+            linux_machine="unknown",
+            linux_rename=lambda *args: pytest.fail("rename called for an unknown machine"),
+            open_parent_fd=opener.open,
+            close_fd=opener.close,
+        )
+    assert opener.opened == []
+    assert opener.closed == []
 
 
 def test_macos_backend_selection_uses_renameatx_np_exclusive_flag() -> None:
@@ -252,6 +276,7 @@ def test_linux_backend_revalidates_parent_fds_before_and_after_rename() -> None:
         operation="rename",
         os_name="posix",
         platform_name="linux",
+        linux_machine="x86_64",
         linux_rename=syscall,
         open_parent_fd=opener.open,
         validate_parent_fd=validate_before,
